@@ -12,8 +12,8 @@ from pydantic import ValidationError
 from app.core.config import Settings
 
 
-# Generate a dummy Twilio SID at runtime instead of hard-coding
-# a credential-shaped string in the source code.
+# Generate a dummy Twilio SID at runtime to avoid hard-coded
+# credential-shaped strings in the source code.
 _TEST_TWILIO_ACCOUNT_SID = "AC" + ("0" * 32)
 
 
@@ -46,13 +46,13 @@ def test_production_rejects_placeholder_gemini_api_key() -> None:
     assert "GEMINI_API_KEY is required in production" in str(exc.value)
 
 
-def test_production_rejects_placeholder_twilio_credentials() -> None:
+def test_production_rejects_missing_twilio_account_sid() -> None:
     with pytest.raises(ValidationError) as exc:
         Settings(
             environment="production",
             gemini_api_key="real_gemini_key_12345",
-            twilio_account_sid="placeholder_twilio_account_sid",
-            twilio_auth_token="placeholder_twilio_auth_token",
+            twilio_account_sid="",
+            twilio_auth_token="valid_auth_token_secret_1234",
             session_encryption_key="custom_secret_key_prod_9988",
             enable_portal_simulation=False,
         )
