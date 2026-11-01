@@ -1,0 +1,44 @@
+# Environment & Secrets
+.env
+.env.*
+*.env
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env/
+build/
+dist/
+*.egg-info/
+
+# Testing & Type checking
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Playwright artifacts & test results
+test-results/
+playwright-report/
+.playwright/
+videos/
+screenshots/
+
+# Logs & temp storage
+logs/
+*.log
+/tmp/
+/tmp/kisan_agent/
+receipts/
+
+# IDE & OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

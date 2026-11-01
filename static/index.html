@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>किसान साथी (Kisan Saathi) - स्वायत्त कृषि सेवा सहायक</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="header-content">
+      <div class="brand">
+        <span class="brand-icon">🌾</span>
+        <div>
+          <h1 class="brand-title">किसान साथी</h1>
+          <span class="brand-subtitle">Kisan Saathi • स्वायत्त कृषि सहायक</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <!-- Language Selector -->
+        <div class="lang-selector-wrapper">
+          <span class="lang-icon">🌐</span>
+          <select id="langSelect" class="lang-dropdown" aria-label="Select Language">
+            <option value="hi" selected>हिन्दी (Hindi)</option>
+            <option value="en">English</option>
+            <option value="gar">गढ़वाली (Garhwali)</option>
+            <option value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+            <option value="mr">मराठी (Marathi)</option>
+            <option value="bn">বাংলা (Bengali)</option>
+            <option value="gu">ગુજરાતી (Gujarati)</option>
+            <option value="ta">தமிழ் (Tamil)</option>
+            <option value="te">తెలుగు (Telugu)</option>
+            <option value="kn">ಕನ್ನಡ (Kannada)</option>
+            <option value="ml">മലയാളം (Malayalam)</option>
+            <option value="or">ଓଡ଼ିଆ (Odia)</option>
+            <option value="as">অসমীয়া (Assamese)</option>
+          </select>
+        </div>
+        <button id="ttsToggleBtn" class="icon-btn" title="आवाज़ चालू/बंद (Toggle Voice)" aria-label="Toggle Audio">
+          <span id="ttsIcon">🔊</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Navigation Tabs -->
+  <nav class="nav-bar">
+    <button class="nav-tab active" data-tab="tab-home">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">होम (Home)</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-chat">
+      <span class="nav-icon">🎙️</span>
+      <span class="nav-label">बोलें / चैट (AI Assistant)</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-services">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">सरकारी सेवाएं (Services)</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-vault">
+      <span class="nav-icon">📁</span>
+      <span class="nav-label">दस्तावेज़ तिजोरी (Vault)</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-tasks">
+      <span class="nav-icon">⏳</span>
+      <span class="nav-label">कार्य स्थिति (Tasks)</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-help">
+      <span class="nav-icon">ℹ️</span>
+      <span class="nav-label">मदद (Help)</span>
+    </button>
+  </nav>
+
+  <!-- Container for Tab Panes -->
+  <main class="main-container">
+
+    <!-- ──────────────── TAB 1: HOME / LANDING ──────────────── -->
+    <section id="tab-home" class="tab-pane active">
+      <!-- Hero Banner -->
+      <div class="hero-card">
+        <div class="hero-badge">🇮🇳 आधिकारिक सरकारी सेवाओं हेतु AI सहायक</div>
+        <h2 class="hero-title">अपनी भाषा में बोलें, सरकार की योजनाएं सीधे पाएं</h2>
+        <p class="hero-desc">
+          फसल बीमा (PMFBY), पीएम-किसान ₹6,000, 4% केसीसी ऋण, मंडी भाव और सरकारी योजनाओं का लाभ उठाएं।
+        </p>
+
+        <!-- Big Voice Action Button -->
+        <div class="hero-mic-box">
+          <button id="heroMicBtn" class="big-mic-btn" aria-label="Start Voice Recording">
+            <span class="big-mic-icon">🎙️</span>
+            <span class="mic-wave"></span>
+          </button>
+          <span class="mic-hint" id="heroMicHint">माइक दबाएं और अपनी समस्या बोलें</span>
+        </div>
+      </div>
+
+      <!-- Quick Action Shortcuts -->
+      <div class="section-header">
+        <h3>🚀 त्वरित सेवाएं (Quick Services)</h3>
+      </div>
+      <div class="quick-grid">
+        <div class="service-card" onclick="startQuickAction('मुझे अपनी फसल का बीमा करवाना है')">
+          <div class="service-icon-wrap bg-green">🌾</div>
+          <h4>फसल बीमा (PMFBY)</h4>
+          <p>1.5% - 2% प्रीमियम पर संपूर्ण फसल सुरक्षा</p>
+          <span class="badge-action">आवेदन शुरू करें →</span>
+        </div>
+
+        <div class="service-card" onclick="startQuickAction('मेरी पीएम किसान की किस्त का क्या हुआ?')">
+          <div class="service-icon-wrap bg-gold">💰</div>
+          <h4>पीएम-किसान ₹6,000</h4>
+          <p>किस्त, e-KYC और आधार सीडिंग जांचें</p>
+          <span class="badge-action">जांचें →</span>
+        </div>
+
+        <div class="service-card" onclick="startQuickAction('आज का मंडी भाव क्या है?')">
+          <div class="service-icon-wrap bg-blue">📈</div>
+          <h4>लाइव मंडी भाव</h4>
+          <p>नजदीकी मंडी व MSP की दैनिक दरें</p>
+          <span class="badge-action">भाव देखें →</span>
+        </div>
+
+        <div class="service-card" onclick="startQuickAction('मुझे केसीसी लोन की जानकारी चाहिए')">
+          <div class="service-icon-wrap bg-purple">💳</div>
+          <h4>केसीसी ऋण (4% ब्याज)</h4>
+          <p>समय पर चुकाने पर 4% वार्षिक ब्याज पर लोन</p>
+          <span class="badge-action">गणना करें →</span>
+        </div>
+
+        <div class="service-card" onclick="startQuickAction('फसल में कीड़ा या रोग लगा है, इलाज बताएं')">
+          <div class="service-icon-wrap bg-red">🐛</div>
+          <h4>फसल डॉक्टर (रोग उपचार)</h4>
+          <p>ICAR अनुमोदित जैविक व रासायनिक उपाय</p>
+          <span class="badge-action">दवा पूछें →</span>
+        </div>
+
+        <div class="service-card" onclick="startQuickAction('गेहूं के लिए खाद की कितनी मात्रा डालनी चाहिए?')">
+          <div class="service-icon-wrap bg-teal">🌱</div>
+          <h4>मृदा स्वास्थ्य व खाद</h4>
+          <p>यूरिया, DAP, जिंक की सही मात्रा</p>
+          <span class="badge-action">सलाह लें →</span>
+        </div>
+      </div>
+
+      <!-- Demonstration Sample Workflow Box -->
+      <div class="demo-card">
+        <div class="demo-card-header">
+          <span>🧪 लाइव प्रदर्शन वर्कफ़्लो (Interactive PMFBY Demo)</span>
+          <span class="demo-tag">SIMULATION MODE</span>
+        </div>
+        <p>
+          परीक्षण हेतु पूर्व-सत्यापित किसान डेटा के साथ संपूर्ण पीएमएफबीवाई आवेदन प्रक्रिया चलाकर देखें।
+        </p>
+        <button id="runDemoBtn" class="btn btn-secondary">
+          ⚡ 1-क्लिक बीमा डेमो चलाएं (Run Insurance Workflow)
+        </button>
+      </div>
+    </section>
+
+    <!-- ──────────────── TAB 2: AI VOICE & CHAT WORKSPACE ──────────────── -->
+    <section id="tab-chat" class="tab-pane">
+      <div class="chat-wrapper">
+        <!-- Chat Message Log -->
+        <div id="chatMessages" class="chat-messages" aria-live="polite">
+          <div class="message-bubble assistant">
+            <div class="bubble-header">
+              <span class="agent-avatar">🌾</span>
+              <strong>किसान साथी AI</strong>
+              <span class="time-stamp">अभी</span>
+            </div>
+            <div class="bubble-body">
+              राम-राम किसान भाई! 🙏 मैं आपका स्वायत्त कृषि सेवा सहायक हूँ।<br>
+              आप बोलकर या लिखकर अपनी फसल, बीमा, पीएम-किसान या खाद-बीज संबंधी कोई भी बात पूछ सकते हैं।
+            </div>
+          </div>
+        </div>
+
+        <!-- Dynamic Multi-Step Task Stepper (Visible when a task is planned) -->
+        <div id="taskStepperBox" class="task-stepper-box hidden">
+          <div class="stepper-title">
+            <span id="stepperIcon">⚡</span>
+            <strong id="stepperGoal">कार्य योजना (Action Plan)</strong>
+          </div>
+          <div id="stepperSteps" class="stepper-steps"></div>
+        </div>
+
+        <!-- Suggested Action Pills -->
+        <div id="actionPills" class="action-pills">
+          <button class="pill" onclick="sendQuickPrompt('मुझे अपनी बाजरे की फसल का बीमा करवाना है')">🌾 बाजरा फसल बीमा</button>
+          <button class="pill" onclick="sendQuickPrompt('मेरी पीएम किसान की 2000 की किस्त कब आएगी?')">💰 पीएम-किसान स्थिति</button>
+          <button class="pill" onclick="sendQuickPrompt('आज गेहूं का मंडी भाव क्या चल रहा है?')">📈 गेहूं का मंडी भाव</button>
+          <button class="pill" onclick="sendQuickPrompt('खेत में पीला रतुआ रोग लगा है, क्या करें?')">🐛 कीट व रोग सलाह</button>
+        </div>
+
+        <!-- Chat Input Bar -->
+        <div class="chat-input-bar">
+          <button id="chatMicBtn" class="chat-mic-btn" title="आवाज़ रिकॉर्ड करें (Speak)" aria-label="Record Audio">
+            <span id="chatMicIcon">🎙️</span>
+          </button>
+          <input type="text" id="chatInput" class="chat-text-input" placeholder="यहाँ लिखें या माइक दबाकर बोलें..." aria-label="Type message">
+          <button id="chatSendBtn" class="chat-send-btn" title="भेजें (Send)" aria-label="Send">
+            <span>➤</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────── TAB 3: SERVICES CATALOG ──────────────── -->
+    <section id="tab-services" class="tab-pane">
+      <div class="section-header">
+        <h2>🏛️ आधिकारिक सरकारी योजनाएं व सेवाएं</h2>
+        <p>भारत सरकार एवं राज्य कृषि विभागों द्वारा संचालित प्रत्यक्ष योजनाएं</p>
+      </div>
+      <div id="servicesList" class="services-list-grid"></div>
+    </section>
+
+    <!-- ──────────────── TAB 4: DOCUMENT VAULT ──────────────── -->
+    <section id="tab-vault" class="tab-pane">
+      <div class="section-header">
+        <h2>📁 किसान दस्तावेज़ तिजोरी (Digital Vault)</h2>
+        <p>आधार, बैंक पासबुक और खतौनी सुरक्षित रखें। संवेदनशील जानकारी स्वतः सुरक्षित (Masked) रहती है।</p>
+      </div>
+
+      <!-- Upload Drop Zone -->
+      <div class="upload-card">
+        <div class="upload-dropzone" id="dropZone">
+          <input type="file" id="fileUploadInput" accept="image/*,.pdf" style="display:none;">
+          <div class="upload-icon">📤</div>
+          <h4>नया दस्तावेज़ अपलोड करें (Upload Document)</h4>
+          <p>आधार कार्ड, पासबुक या खतौनी की फ़ोटो चुनें (JPG, PNG, PDF)</p>
+          <button class="btn btn-primary" onclick="document.getElementById('fileUploadInput').click()">
+            फ़ाइल चुनें या कैमरा खोलें
+          </button>
+          <span class="upload-privacy-note">🔒 सरकारी पोर्टल के लिए फ़ोटो 95KB से कम में अनुकूलित होती है।</span>
+        </div>
+        <div id="uploadProgress" class="upload-progress hidden">
+          <div class="spinner"></div>
+          <span id="uploadStatusText">दस्तावेज़ स्कैन हो रहा है...</span>
+        </div>
+      </div>
+
+      <!-- Verified Documents List -->
+      <div class="vault-docs-header">
+        <h3>सत्यापित दस्तावेज़ सूची</h3>
+      </div>
+      <div id="vaultDocsList" class="vault-docs-grid">
+        <div class="empty-state">
+          <span>📄</span>
+          <p>अभी कोई दस्तावेज़ अपलोड नहीं हुआ है। ऊपर बटन दबाकर अपलोड करें।</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────── TAB 5: ACTIVE TASKS ──────────────── -->
+    <section id="tab-tasks" class="tab-pane">
+      <div class="section-header">
+        <h2>⏳ कार्य प्रगति एवं इतिहास (Tasks & Applications)</h2>
+        <p>आपके द्वारा शुरू किए गए आवेदनों की लाइव स्थिति</p>
+      </div>
+      <div id="tasksList" class="tasks-list">
+        <div class="empty-state">
+          <span>📋</span>
+          <p>कोई सक्रिय कार्य नहीं है। होम स्क्रीन से सेवा शुरू करें।</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────── TAB 6: HELP & SUPPORT ──────────────── -->
+    <section id="tab-help" class="tab-pane">
+      <div class="section-header">
+        <h2>ℹ️ सहायता एवं किसान हेल्पलाइन</h2>
+        <p>आधिकारिक सरकारी संपर्क सूत्र व अक्सर पूछे जाने वाले प्रश्न</p>
+      </div>
+
+      <div class="helpline-grid">
+        <div class="helpline-card">
+          <div class="hl-icon">📞</div>
+          <h4>PMFBY टोल-फ्री हेल्पलाइन</h4>
+          <p class="hl-number">155261 / 14447</p>
+          <span class="hl-desc">फसल बीमा, दावा सूचना एवं शिकायत निवारण</span>
+        </div>
+
+        <div class="helpline-card">
+          <div class="hl-icon">🌾</div>
+          <h4>किसान कॉल सेन्टर (Kisan Call Centre)</h4>
+          <p class="hl-number">1800-180-1551</p>
+          <span class="hl-desc">कृषि विशेषज्ञों द्वारा सभी भाषाओं में सुबह 6 से रात 10 बजे तक</span>
+        </div>
+
+        <div class="helpline-card">
+          <div class="hl-icon">💳</div>
+          <h4>PM-KISAN हेल्पडेस्क</h4>
+          <p class="hl-number">011-24300606</p>
+          <span class="hl-desc">सम्मान निधि किस्त, बैंक खाता व e-KYC समाधान</span>
+        </div>
+      </div>
+
+      <div class="faq-card">
+        <h3>अक्सर पूछे जाने वाले सवाल (FAQ)</h3>
+        <details>
+          <summary>क्या किसान साथी आधिकारिक सरकारी आवेदन जमा करता है?</summary>
+          <p>हाँ, किसान साथी PMFBY एवं अधिकृत सरकारी पोर्टलों के जरिए आवेदन तैयार करता है। अंतिम सबमिशन से पूर्व किसान को OTP प्राप्त होता है, जिसे दर्ज करने पर ही वैध आवेदन स्वीकार होता है।</p>
+        </details>
+        <details>
+          <summary>क्या मेरा आधार नंबर सुरक्षित है?</summary>
+          <p>पूर्णतः सुरक्षित। किसान साथी कभी भी 12-अंकों का पूरा आधार नंबर डेटाबेस या लॉग में स्टोर नहीं करता। केवल सत्यापन हेतु अंतिम 4 अंक ही उपयोग होते हैं।</p>
+        </details>
+        <details>
+          <summary>फसल नुकसान होने पर क्लेम कब तक करना चाहिए?</summary>
+          <p>प्राकृतिक आपदा (ओलावृष्टि, जलभराव आदि) के 72 घंटे (3 दिन) के भीतर PMFBY हेल्पलाइन 14447 या 'Crop Insurance' ऐप पर सूचना देना अनिवार्य है।</p>
+        </details>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ──────────────── MODALS ──────────────── -->
+
+  <!-- Document OCR Review & Edit Modal -->
+  <div id="docReviewModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🔍 दस्तावेज़ से प्राप्त जानकारी की समीक्षा करें</h3>
+        <button class="modal-close-btn" onclick="closeDocReviewModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">कृपया सुनिश्चित करें कि निकाली गई जानकारी सही है। यदि कोई त्रुटि हो, तो उसे सुधार लें:</p>
+        <form id="docReviewForm">
+          <div class="form-group">
+            <label>किसान का नाम (Farmer Name)</label>
+            <input type="text" id="reviewFarmerName" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>आधार (अंतिम 4 अंक)</label>
+              <input type="text" id="reviewAadhaarLast4" maxlength="4" required>
+            </div>
+            <div class="form-group">
+              <label>फसल (Crop)</label>
+              <input type="text" id="reviewCropName" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>खसरा / प्लॉट नंबर (Khasra No)</label>
+              <input type="text" id="reviewKhasra" required>
+            </div>
+            <div class="form-group">
+              <label>रकबा (क्षेत्रफल हेक्टेयर में)</label>
+              <input type="number" step="0.01" id="reviewArea" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>बैंक IFSC कोड</label>
+              <input type="text" id="reviewIfsc" maxlength="11" required>
+            </div>
+            <div class="form-group">
+              <label>खाता संख्या (अंतिम 4 अंक)</label>
+              <input type="text" id="reviewAccountLast4" maxlength="4" required>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeDocReviewModal()">रद्द करें</button>
+        <button class="btn btn-primary" onclick="proceedToApplicationFromReview()">
+          सत्यापित करें और आवेदन तैयार करें →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Final Application Approval & OTP Modal -->
+  <div id="otpModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🔐 अंतिम पुष्टि एवं आधिकारिक OTP सत्यापन</h3>
+        <button class="modal-close-btn" onclick="closeOtpModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-info">
+          <strong>📋 आवेदन सारांश (Application Summary)</strong>
+          <div id="otpAppSummary" class="app-summary-text"></div>
+        </div>
+
+        <div class="otp-input-section">
+          <label for="otpInputField">
+            <strong>पोर्टल सत्यापन OTP (6-Digit OTP)</strong>
+            <p>आपके पंजीकृत मोबाइल नंबर पर सरकार द्वारा भेजा गया 6-अंकों का OTP दर्ज करें:</p>
+          </label>
+          <input type="text" id="otpInputField" class="otp-input" maxlength="6" placeholder="• • • • • •" autocomplete="one-time-code">
+          <span class="otp-privacy-badge">🔒 सुरक्षा नियम: OTP कभी भी लॉग या तीसरे पक्ष को शेयर नहीं किया जाता।</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeOtpModal()">रद्द करें</button>
+        <button id="submitOtpBtn" class="btn btn-primary" onclick="submitApplicationOtp()">
+          पुष्टि करें और सबमिट करें (Submit Application)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Receipt Download Modal -->
+  <div id="receiptModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🎉 आवेदन सफलतापूर्वक पूरा हुआ!</h3>
+        <button class="modal-close-btn" onclick="closeReceiptModal()">✕</button>
+      </div>
+      <div class="modal-body text-center">
+        <div class="success-check-icon">✅</div>
+        <h4 id="receiptRefNo">आवेदन संदर्भ संख्या: PMFBY/2026/849201</h4>
+        <div id="simulationWatermarkNotice" class="watermark-notice-box hidden">
+          ⚠️ <strong>सूचना:</strong> यह केवल प्रदर्शन (Simulation) मोड है — कोई वास्तविक सरकारी बीमा जारी नहीं हुआ है।
+        </div>
+        <p id="receiptMessageText" class="receipt-msg"></p>
+        <div class="receipt-actions">
+          <a id="downloadPdfLink" href="#" target="_blank" class="btn btn-primary">
+            📄 आधिकारिक रसीद (PDF) डाउनलोड करें
+          </a>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeReceiptModal()">समाप्त करें (Close)</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+

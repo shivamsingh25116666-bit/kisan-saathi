@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: kisan-saathi-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kisan-saathi-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_SESSION_TTL_SECONDS=900
+      - REDIS_OTP_TTL_SECONDS=300
+      - USE_IN_MEMORY_STATE_FALLBACK=true
+      - BROWSER_HEADLESS=true
+      - ENABLE_PORTAL_SIMULATION=true
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=gemini-2.5-flash
+      - SESSION_ENCRYPTION_KEY=kisan_secure_session_encryption_secret_2026
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - /tmp/kisan_agent:/tmp/kisan_agent
+
+volumes:
+  redis_data:
+
