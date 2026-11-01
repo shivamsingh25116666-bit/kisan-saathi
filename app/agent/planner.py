@@ -3,23 +3,21 @@ app/agent/planner.py
 ──────────────────────────────────────────────────────────────────────────────
 Autonomous Multilingual Task Planner & Execution Engine for Kisan Saathi.
 
-RESPONSIBILITIES:
-  1. Understand natural farmer intent across dialects, informal speech, and typos.
-  2. Automatic Indian language detection (Hindi, Garhwali, Punjabi, Marathi, Bengali,
-     Gujarati, Tamil, Telugu, Kannada, Malayalam, Odia, Assamese, English).
-  3. Dynamic task decomposition: separates facts, assumptions, and missing info.
-  4. Extensible tool orchestration with official verified sources.
-  5. Multi-step plan generation with explicit human approval checkpoints.
-  6. Resumable task state management integrated with StateManager.
+Responsibilities:
+1. Understand farmer intent across languages, dialects and informal speech.
+2. Detect supported Indian languages.
+3. Extract crop, location and land-area information.
+4. Generate structured task plans.
+5. Execute registered agricultural tools.
+6. Maintain farmer approval checkpoints.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from app.agent.tools import registry
 from app.core.config import get_settings
@@ -29,9 +27,11 @@ from app.core.state_manager import state_manager
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# ──────────────────────────────────────────────────────────────────────────────
-# MULTILINGUAL LANGUAGE DETECTION & DIALECT MAPPINGS
-# ──────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUPPORTED LANGUAGES
+# ─────────────────────────────────────────────────────────────────────────────
+
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
     "hi": {"name": "Hindi", "native": "हिन्दी", "locale": "hi-IN"},
     "en": {"name": "English", "native": "English", "locale": "en-IN"},
@@ -49,66 +49,105 @@ SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LANGUAGE DETECTION
+# ─────────────────────────────────────────────────────────────────────────────
+
 def detect_language(text: str) -> str:
-    """Detect language from Indian script Unicode ranges and dialect markers."""
+    """Detect language using Indian script ranges and simple word markers."""
+
     if not text:
         return "hi"
 
-    # Script character checks
+    # Punjabi: Gurmukhi
     for char in text:
         code = ord(char)
-        if 0x0A00 <= code <= 0x0A7F:
-            return "pa"  # Gurmukhi
-        if 0x0980 <= code <= 0x09FF:
-            # Assamese shares Bengali script but has specific characters or keywords
-            if "অসম" in text or "ভাল" in text or "কৰা" in text:
-                return "as"
-            return "bn"  # Bengali
-        if 0x0A80 <= code <= 0x0AFF:
-            return "gu"  # Gujarati
-        if 0x0B00 <= code <= 0x0B7F:
-            return "or"  # Odia
-        if 0x0B80 <= code <= 0x0BFF:
-            return "ta"  # Tamil
-        if 0x0C00 <= code <= 0x0C7F:
-            return "te"  # Telugu
-        if 0x0C80 <= code <= 0x0CFF:
-            return "kn"  # Kannada
-        if 0x0D00 <= code <= 0x0D7F:
-            return "ml"  # Malayalam
 
-    # Devanagari regional dialect / language heuristics
+        if 0x0A00 <= code <= 0x0A7F:
+            return "pa"
+
+        if 0x0980 <= code <= 0x09FF:
+            if any(word in text for word in ("অসম", "ভাল", "কৰা")):
+                return "as"
+            return "bn"
+
+        if 0x0A80 <= code <= 0x0AFF:
+            return "gu"
+
+        if 0x0B00 <= code <= 0x0B7F:
+            return "or"
+
+        if 0x0B80 <= code <= 0x0BFF:
+            return "ta"
+
+        if 0x0C00 <= code <= 0x0C7F:
+            return "te"
+
+        if 0x0C80 <= code <= 0x0CFF:
+            return "kn"
+
+        if 0x0D00 <= code <= 0x0D7F:
+            return "ml"
+
     text_lower = text.lower()
-    # Garhwali dialect markers
-    if any(w in text_lower for w in ("कख", "कैंक", "म्यार", "कथगा", "ह्वै", "रौं", "दाज्यू", "भुलू")):
+
+    # Garhwali markers
+    garhwali_words = (
+        "कख", "कैंक", "म्यार", "कथगा",
+        "ह्वै", "रौं", "दाज्यू", "भुलू",
+    )
+
+    if any(word in text_lower for word in garhwali_words):
         return "gar"
-    # Marathi dialect markers
-    if any(w in text_lower for w in ("आहे", "नाही", "पाहिजे", "शेतकरी", "पिक", "करा", "सांगा")):
+
+    # Marathi markers
+    marathi_words = (
+        "आहे", "नाही", "पाहिजे",
+        "शेतकरी", "पिक", "करा", "सांगा",
+    )
+
+    if any(word in text_lower for word in marathi_words):
         return "mr"
 
-    # Latin text detection: English vs transliterated Hindi
-    has_devanagari = any(0x0900 <= ord(c) <= 0x097F for c in text)
+    # English detection
+    has_devanagari = any(
+        0x0900 <= ord(char) <= 0x097F
+        for char in text
+    )
+
     if not has_devanagari:
-        # Check if predominantly English keywords
-        english_words = {"insurance", "claim", "crop", "farmer", "subsidy", "loan", "weather", "soil", "price", "hello", "help", "need"}
+        english_words = {
+            "insurance", "claim", "crop", "farmer",
+            "subsidy", "loan", "weather", "soil",
+            "price", "hello", "help", "need",
+        }
+
         words = set(re.findall(r"\b[a-zA-Z]+\b", text_lower))
-        if len(words & english_words) >= 2 or (len(words) > 0 and len(words & english_words) / len(words) > 0.4):
-            return "en"
+
+        if words:
+            matching_words = words.intersection(english_words)
+
+            if len(matching_words) >= 2:
+                return "en"
+
+            if len(matching_words) / len(words) > 0.4:
+                return "en"
 
     return "hi"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# GENERAL-PURPOSE INTENT UNDERSTANDING & TASK PLANNER
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# TASK STEP
+# ─────────────────────────────────────────────────────────────────────────────
 
 class TaskStep:
+
     def __init__(
         self,
         step_id: int,
         title: str,
         description: str,
-        status: str = "pending",  # pending | in_progress | waiting_approval | completed | failed
+        status: str = "pending",
         tool_to_execute: Optional[str] = None,
         tool_params: Optional[dict[str, Any]] = None,
         requires_farmer_approval: bool = False,
@@ -135,7 +174,12 @@ class TaskStep:
         }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTION PLAN
+# ─────────────────────────────────────────────────────────────────────────────
+
 class ExecutionPlan:
+
     def __init__(
         self,
         task_id: str,
@@ -165,7 +209,7 @@ class ExecutionPlan:
             "category": self.category,
             "language": self.language,
             "status": self.status,
-            "steps": [s.to_dict() for s in self.steps],
+            "steps": [step.to_dict() for step in self.steps],
             "extracted_facts": self.extracted_facts,
             "missing_info": self.missing_info,
             "clarification_prompt": self.clarification_prompt,
@@ -173,46 +217,72 @@ class ExecutionPlan:
         }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GENERAL AGENT PLANNER
+# ─────────────────────────────────────────────────────────────────────────────
+
 class GeneralAgentPlanner:
-    """
-    General-purpose intent parsing, task decomposition, and plan execution.
-    Composes registered tools dynamically rather than relying on hardcoded replies.
-    """
 
     def __init__(self):
         self._active_plans: dict[str, ExecutionPlan] = {}
 
-    def extract_crop_and_location(self, query: str) -> dict[str, Any]:
-        """Heuristic extractor for crops, land sizes, and states from natural query."""
+    # ─────────────────────────────────────────────────────────────────────────
+    # CROP, STATE AND LAND-AREA EXTRACTION
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def extract_crop_and_location(
+        self,
+        query: str,
+    ) -> dict[str, Any]:
+
         q = query.lower()
         facts: dict[str, Any] = {}
 
-        # Crop matching (including direct and inflected Hindi/regional forms)
         crops = {
-            "wheat": ["wheat", "gehun", "gehu", "कनक", "गेहूं", "गेहूँ"],
-            "bajra": ["bajra", "pearl millet", "बाजरा", "बाजरी", "बाजरे"],
-            "paddy": ["paddy", "rice", "dhan", "चावल", "धान", "चांवल"],
-            "mustard": ["mustard", "sarson", "sarso", "सरसों", "राई", "तोरी"],
-            "cotton": ["cotton", "kapas", "कापूस", "कपास"],
-            "maize": ["maize", "corn", "makka", "मक्का", "मका", "मक्के"],
-            "soybean": ["soybean", "soya", "सोयाबीन"],
-            "gram": ["gram", "chana", "चना", "हरभरा", "चने"],
-            "onion": ["onion", "pyaz", "कांदा", "प्याज"],
-            "potato": ["potato", "aloo", "बटाटा", "आलू"],
+            "wheat": [
+                "wheat", "gehun", "gehu", "कनक", "गेहूं", "गेहूँ",
+            ],
+            "bajra": [
+                "bajra", "pearl millet", "बाजरा", "बाजरी", "बाजरे",
+            ],
+            "paddy": [
+                "paddy", "rice", "dhan", "चावल", "धान", "चांवल",
+            ],
+            "mustard": [
+                "mustard", "sarson", "sarso", "सरसों", "राई", "तोरी",
+            ],
+            "cotton": [
+                "cotton", "kapas", "कापूस", "कपास",
+            ],
+            "maize": [
+                "maize", "corn", "makka", "मक्का", "मका", "मक्के",
+            ],
+            "soybean": [
+                "soybean", "soya", "सोयाबीन",
+            ],
+            "gram": [
+                "gram", "chana", "चना", "हरभरा", "चने",
+            ],
+            "onion": [
+                "onion", "pyaz", "कांदा", "प्याज",
+            ],
+            "potato": [
+                "potato", "aloo", "बटाटा", "आलू",
+            ],
         }
-        for canon, syns in crops.items():
-            if any(s in q for s in syns):
-                facts["crop_name"] = canon.title()
+
+        for canonical_name, synonyms in crops.items():
+            if any(word in q for word in synonyms):
+                facts["crop_name"] = canonical_name.title()
                 break
 
-        # State matching
         states = {
             "Rajasthan": ["rajasthan", "राजस्थान"],
             "Maharashtra": ["maharashtra", "महाराष्ट्र"],
-            "Uttar Pradesh": ["uttar pradesh", "up", "उत्तर प्रदेश"],
+            "Uttar Pradesh": ["uttar pradesh", "उत्तर प्रदेश"],
             "Punjab": ["punjab", "पंजाब"],
             "Haryana": ["haryana", "हरियाणा"],
-            "Madhya Pradesh": ["madhya pradesh", "mp", "मध्य प्रदेश"],
+            "Madhya Pradesh": ["madhya pradesh", "मध्य प्रदेश"],
             "Gujarat": ["gujarat", "गुजरात"],
             "Bihar": ["bihar", "बिहार"],
             "Karnataka": ["karnataka", "कर्नाटक"],
@@ -220,24 +290,36 @@ class GeneralAgentPlanner:
             "West Bengal": ["bengal", "west bengal", "बंगाल"],
             "Uttarakhand": ["uttarakhand", "उत्तराखंड"],
         }
-        for canon, syns in states.items():
-            if any(s in q for s in syns):
-                facts["state"] = canon
+
+        for canonical_state, synonyms in states.items():
+            if any(word in q for word in synonyms):
+                facts["state"] = canonical_state
                 break
 
-        # Area matching
-        area_match = re.search(r"(\d+(\.\d+)?)\s*(bigha|hectare|ha|acre|बीघा|एकड़|हेक्टेयर)", q)
+        area_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*"
+            r"(bigha|hectare|ha|acre|बीघा|एकड़|हेक्टेयर)",
+            q,
+        )
+
         if area_match:
-            val = float(area_match.group(1))
-            unit = area_match.group(3).lower()
+            value = float(area_match.group(1))
+            unit = area_match.group(2).lower()
+
             if unit in ("bigha", "बीघा"):
-                facts["land_area_ha"] = round(val * 0.25, 2)  # ~4 bigha = 1 ha in Rajasthan/UP
+                facts["land_area_ha"] = round(value * 0.25, 2)
+
             elif unit in ("acre", "एकड़"):
-                facts["land_area_ha"] = round(val * 0.4047, 2)
+                facts["land_area_ha"] = round(value * 0.4047, 2)
+
             else:
-                facts["land_area_ha"] = val
+                facts["land_area_ha"] = value
 
         return facts
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CREATE PLAN
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def create_plan(
         self,
@@ -246,172 +328,356 @@ class GeneralAgentPlanner:
         language: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
     ) -> ExecutionPlan:
-        """Dynamically decompose a farmer's request into a verified multi-step plan."""
+
+        """Understand a farmer query and generate an executable task plan."""
+
         lang = language or detect_language(query)
         q_lower = query.lower()
-        extracted = self.extract_crop_and_location(query)
-        if context:
-            extracted.update({k: v for k, v in context.items() if v})
 
-        # Identify Intent Category
+        # Normalize spaces, hyphens, underscores and slashes.
+        # This makes PM-KISAN, PM KISAN and PM_KISAN match consistently.
+        intent_text = re.sub(
+            r"[\s\-_/]+",
+            " ",
+            q_lower,
+        ).strip()
+
+        extracted = self.extract_crop_and_location(query)
+
+        if context:
+            extracted.update({
+                key: value
+                for key, value in context.items()
+                if value
+            })
+
         missing_info: list[str] = []
         steps: list[TaskStep] = []
         clarification: Optional[str] = None
         category = "general"
 
-        if any(w in q_lower for w in ("insurance", "bima", "बीमा", "pmfby", "fasal bima", "क्लेम", "claim")):
+        # ─────────────────────────────────────────────────────────────────────
+        # 1. PMFBY CROP INSURANCE
+        # ─────────────────────────────────────────────────────────────────────
+
+        if any(term in intent_text for term in (
+            "insurance",
+            "bima",
+            "बीमा",
+            "pmfby",
+            "fasal bima",
+            "क्लेम",
+            "claim",
+            "फसल बीमा",
+        )):
+
             category = "crop_insurance"
+
             crop = extracted.get("crop_name")
             state = extracted.get("state")
 
             if not crop:
                 missing_info.append("crop_name")
+
             if not state:
                 missing_info.append("state")
 
-            # Step 1: Scheme verification and premium calculation
             steps.append(TaskStep(
                 step_id=1,
                 title="Scheme Rules & Premium Calculation",
-                description="Retrieve verified PMFBY insurance terms, farmer premium share (1.5-2%), and official cutoff date.",
+                description=(
+                    "Retrieve verified PMFBY insurance terms, farmer premium "
+                    "share (1.5-2%), and official cutoff date."
+                ),
                 status="pending",
                 tool_to_execute="crop_insurance_details",
-                tool_params={"crop_name": crop or "Wheat", "state": state or "Rajasthan", "season": "Kharif"},
+                tool_params={
+                    "crop_name": crop or "Wheat",
+                    "state": state or "Rajasthan",
+                    "season": "Kharif",
+                },
             ))
 
-            # Step 2: Document Verification
             steps.append(TaskStep(
                 step_id=2,
                 title="Required Document Intake & OCR Verification",
-                description="Upload Aadhaar, Bank Passbook, and Khatauni land record. Auto-extract plot number, area, and IFSC code.",
-                status="pending",
-                tool_to_execute=None,
-                requires_farmer_approval=False,
+                description=(
+                    "Upload Aadhaar, Bank Passbook, and Khatauni land record. "
+                    "Auto-extract plot number, area, and IFSC code."
+                ),
             ))
 
-            # Step 3: Farmer Approval Gate
             steps.append(TaskStep(
                 step_id=3,
                 title="Review Application & Obtain Farmer Approval",
-                description="Present calculated premium, land details, and official terms for farmer verification. Require explicit approval.",
-                status="pending",
+                description=(
+                    "Present calculated premium, land details, and official "
+                    "terms for farmer verification. Require explicit approval."
+                ),
                 requires_farmer_approval=True,
             ))
 
-            # Step 4: Portal Registration & OTP Checkpoint
             steps.append(TaskStep(
                 step_id=4,
-                title="Official Portal Registration & Legitimate OTP Verification",
-                description="Launch authorized PMFBY portal registration, fill verified fields, and request official government OTP from farmer.",
-                status="pending",
-                tool_to_execute=None,
+                title="Official Portal Registration & OTP Verification",
+                description=(
+                    "Launch authorized PMFBY portal registration, fill "
+                    "verified fields, and request legitimate OTP verification."
+                ),
                 requires_farmer_approval=True,
             ))
 
-            # Step 5: Submission Confirmation & Receipt Delivery
             steps.append(TaskStep(
                 step_id=5,
-                title="Verified Submission Confirmation & Receipt Delivery",
-                description="Verify official government portal acknowledgment number and generate audit-trail summary with downloadable receipt.",
-                status="pending",
+                title="Submission Confirmation & Receipt Delivery",
+                description=(
+                    "Verify official government portal acknowledgment number "
+                    "and generate an audit-trail summary."
+                ),
             ))
 
             if "crop_name" in missing_info:
                 clarification = (
-                    "🌾 Aap kaun si fasal ka bima karwana chahte hain? (Jaise: Bajra, Gehun, Dhan)"
-                    if lang in ("hi", "gar") else
-                    "🌾 Which crop do you wish to insure? (e.g. Bajra, Wheat, Paddy)"
+                    "🌾 आप कौन सी फसल का बीमा करवाना चाहते हैं? "
+                    "जैसे: बाजरा, गेहूं या धान।"
+                    if lang in ("hi", "gar")
+                    else
+                    "🌾 Which crop do you wish to insure? "
+                    "For example: Bajra, Wheat or Paddy."
                 )
 
-        elif any(w in q_lower for w in ("kisan samman", "pm-kisan", "pm kisan", "2000", "installment", "किस्त", "सम्मान निधि")):
+        # ─────────────────────────────────────────────────────────────────────
+        # 2. PM-KISAN
+        # ─────────────────────────────────────────────────────────────────────
+
+        elif any(term in intent_text for term in (
+            "kisan samman",
+            "kisan samman nidhi",
+            "pm kisan",
+            "pmkisan",
+            "2000",
+            "installment",
+            "installments",
+            "kisaan",
+            "किस्त",
+            "सम्मान निधि",
+            "पीएम किसान",
+            "पीएम-किसान",
+            "प्रधानमंत्री किसान",
+            "प्रधानमंत्री सम्मान निधि",
+            "किसान सम्मान निधि",
+        )):
+
             category = "pm_kisan"
+
             steps.append(TaskStep(
                 step_id=1,
-                title="Check PM-KISAN Scheme Guidelines & Installment Eligibility",
-                description="Retrieve official ₹6,000/year guidelines, DBT bank seeding rules, and mandatory e-KYC authentication steps.",
+                title="Check PM-KISAN Scheme Guidelines & Eligibility",
+                description=(
+                    "Retrieve PM-KISAN scheme guidelines, annual income "
+                    "support details, DBT bank seeding rules and e-KYC steps."
+                ),
                 status="pending",
                 tool_to_execute="pm_kisan_advisory",
-                tool_params={"state": extracted.get("state", "Rajasthan")},
+                tool_params={
+                    "state": extracted.get("state", "Rajasthan"),
+                },
             ))
+
             steps.append(TaskStep(
                 step_id=2,
                 title="Verify Land Seeding & Aadhaar DBT Linkage",
-                description="Guide farmer to verify active NPCI bank mapping and land seeding on the official portal.",
-                status="pending",
+                description=(
+                    "Guide the farmer to verify active NPCI bank mapping "
+                    "and land seeding on the official PM-KISAN portal."
+                ),
             ))
 
-        elif any(w in q_lower for w in ("kcc", "loan", "kredit", "credit card", "ऋण", "लोन", "कर्ज")):
+        # ─────────────────────────────────────────────────────────────────────
+        # 3. KISAN CREDIT CARD
+        # ─────────────────────────────────────────────────────────────────────
+
+        elif any(term in intent_text for term in (
+            "kcc",
+            "loan",
+            "kredit",
+            "credit card",
+            "ऋण",
+            "लोन",
+            "कर्ज",
+            "किसान क्रेडिट कार्ड",
+        )):
+
             category = "credit_and_loans"
+
             steps.append(TaskStep(
                 step_id=1,
-                title="Calculate Subsidized KCC Loan Limit",
-                description="Calculate scale of finance, 4% subsidized interest rate under prompt repayment, and collateral-free thresholds.",
+                title="Calculate KCC Loan Limit",
+                description=(
+                    "Calculate the indicative agricultural credit limit "
+                    "using crop, land area and applicable scheme guidelines."
+                ),
                 status="pending",
                 tool_to_execute="kcc_loan_advisory",
                 tool_params={
                     "crop_name": extracted.get("crop_name", "Wheat"),
-                    "land_area_hectares": extracted.get("land_area_ha", 1.0),
+                    "land_area_hectares": extracted.get(
+                        "land_area_ha",
+                        1.0,
+                    ),
                     "state": extracted.get("state", "Rajasthan"),
                 },
             ))
+
             steps.append(TaskStep(
                 step_id=2,
                 title="Prepare Bank Application Checklist",
-                description="List required revenue documents (Khatauni, No-Dues Certificate) for commercial or regional rural bank.",
-                status="pending",
+                description=(
+                    "List required land records, identity documents and "
+                    "bank requirements for the KCC application."
+                ),
             ))
 
-        elif any(w in q_lower for w in ("mandi", "bhav", "price", "rate", "भाव", "मंडी", "दाम", "msp")):
+        # ─────────────────────────────────────────────────────────────────────
+        # 4. MANDI PRICES
+        # ─────────────────────────────────────────────────────────────────────
+
+        elif any(term in intent_text for term in (
+            "mandi",
+            "bhav",
+            "price",
+            "rate",
+            "भाव",
+            "मंडी",
+            "दाम",
+            "msp",
+            "बाजार भाव",
+        )):
+
             category = "market_prices"
+
             crop = extracted.get("crop_name", "Bajra")
+
             steps.append(TaskStep(
                 step_id=1,
-                title=f"Fetch APMC Mandi Modal Prices for {crop}",
-                description="Retrieve Agmarknet verified modal, minimum, maximum prices and compare against Central Minimum Support Price (MSP).",
+                title=f"Fetch Mandi Prices for {crop}",
+                description=(
+                    "Retrieve mandi price information and compare the "
+                    "available price information with the applicable MSP."
+                ),
                 status="pending",
                 tool_to_execute="mandi_prices",
-                tool_params={"crop_name": crop, "state": extracted.get("state")},
+                tool_params={
+                    "crop_name": crop,
+                    "state": extracted.get("state"),
+                },
             ))
 
-        elif any(w in q_lower for w in ("khad", "fertilizer", "soil", "urea", "dap", "खाद", "मिट्टी", "यूरिया")):
+        # ─────────────────────────────────────────────────────────────────────
+        # 5. SOIL AND FERTILIZER ADVISORY
+        # ─────────────────────────────────────────────────────────────────────
+
+        elif any(term in intent_text for term in (
+            "khad",
+            "fertilizer",
+            "soil",
+            "urea",
+            "dap",
+            "खाद",
+            "मिट्टी",
+            "यूरिया",
+            "उर्वरक",
+            "मृदा",
+        )):
+
             category = "agronomy"
+
             crop = extracted.get("crop_name", "Wheat")
+
             steps.append(TaskStep(
                 step_id=1,
-                title=f"Soil Health Card N-P-K Recommendation for {crop}",
-                description="Retrieve ICAR-approved scientific dosage for Nitrogen, Phosphorus, Potassium, Zinc, and bio-fertilizers.",
+                title=f"Soil Health Recommendation for {crop}",
+                description=(
+                    "Retrieve relevant crop nutrient and soil-health "
+                    "recommendations. Confirm local soil-test details "
+                    "before applying fertilizer."
+                ),
                 status="pending",
                 tool_to_execute="soil_health_advisory",
-                tool_params={"crop_name": crop},
+                tool_params={
+                    "crop_name": crop,
+                },
             ))
 
-        elif any(w in q_lower for w in ("keeda", "pest", "disease", "peela", "sundee", "कीड़ा", "रोग", "इल्ली", "फंगस", "पिला")):
+        # ─────────────────────────────────────────────────────────────────────
+        # 6. CROP DISEASE AND PEST DIAGNOSIS
+        # ─────────────────────────────────────────────────────────────────────
+
+        elif any(term in intent_text for term in (
+            "keeda",
+            "pest",
+            "disease",
+            "peela",
+            "sundee",
+            "कीड़ा",
+            "कीट",
+            "रोग",
+            "इल्ली",
+            "फंगस",
+            "पिला",
+            "बीमारी",
+        )):
+
             category = "crop_health"
+
             crop = extracted.get("crop_name", "Wheat")
+
             steps.append(TaskStep(
                 step_id=1,
-                title=f"Diagnose Symptoms & Prescribe ICAR Remedies for {crop}",
-                description="Analyze leaf symptoms and match approved organic (Neem, Trichoderma) and chemical control guidelines.",
+                title=f"Diagnose Crop Symptoms for {crop}",
+                description=(
+                    "Analyze the reported crop symptoms and retrieve "
+                    "appropriate crop-health management guidance."
+                ),
                 status="pending",
                 tool_to_execute="pest_disease_diagnostic",
-                tool_params={"crop_name": crop, "symptoms": query},
+                tool_params={
+                    "crop_name": crop,
+                    "symptoms": query,
+                },
             ))
 
+        # ─────────────────────────────────────────────────────────────────────
+        # 7. GENERAL AGRICULTURAL ADVISORY
+        # ─────────────────────────────────────────────────────────────────────
+
         else:
-            # General Agricultural Advisory / Fallback Plan
+
             category = "general_advisory"
+
             steps.append(TaskStep(
                 step_id=1,
-                title="Analyze Farmer Requirement & Consult Verified Agricultural Knowledge",
-                description="Match question with official central & state agricultural scheme guidelines and advisory services.",
+                title="Understand Farmer Requirement",
+                description=(
+                    "Analyze the farmer's requirement and identify the "
+                    "relevant agricultural advisory or government service."
+                ),
                 status="pending",
             ))
+
             steps.append(TaskStep(
                 step_id=2,
-                title="Formulate Step-by-Step Action Plan",
-                description="Provide safe next steps, required documents, or recommend official helpline 1800-180-1551.",
+                title="Prepare Action Plan",
+                description=(
+                    "Provide relevant next steps, required information "
+                    "or an appropriate official agricultural helpline."
+                ),
                 status="pending",
             ))
+
+        # ─────────────────────────────────────────────────────────────────────
+        # BUILD EXECUTION PLAN
+        # ─────────────────────────────────────────────────────────────────────
 
         plan = ExecutionPlan(
             task_id=task_id,
@@ -425,42 +691,102 @@ class GeneralAgentPlanner:
         )
 
         self._active_plans[task_id] = plan
+
+        logger.info(
+            "[Planner] Created plan %s with category %s and %d steps",
+            task_id,
+            category,
+            len(steps),
+        )
+
         return plan
 
-    async def execute_step(self, task_id: str, step_id: int) -> dict[str, Any]:
-        """Execute a single step in an existing plan."""
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXECUTE PLAN STEP
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def execute_step(
+        self,
+        task_id: str,
+        step_id: int,
+    ) -> dict[str, Any]:
+
+        """Execute a registered tool for a selected plan step."""
+
         plan = self._active_plans.get(task_id)
+
         if not plan:
-            return {"success": False, "error": f"Plan {task_id} not found."}
+            return {
+                "success": False,
+                "error": f"Plan {task_id} not found.",
+            }
 
         target_step: Optional[TaskStep] = None
-        for s in plan.steps:
-            if s.step_id == step_id:
-                target_step = s
+
+        for step in plan.steps:
+            if step.step_id == step_id:
+                target_step = step
                 break
 
-        if not target_step:
-            return {"success": False, "error": f"Step {step_id} not found in plan {task_id}."}
+        if target_step is None:
+            return {
+                "success": False,
+                "error": f"Step {step_id} not found in plan {task_id}.",
+            }
 
         target_step.status = "in_progress"
 
         if target_step.tool_to_execute:
+
             tool = registry.get(target_step.tool_to_execute)
-            if tool:
-                result = await tool.execute(**target_step.tool_params)
-                target_step.result = result
-                target_step.status = "completed" if result.get("success") else "failed"
+
+            if not tool:
+                target_step.status = "failed"
+
                 return {
-                    "success": True,
+                    "success": False,
+                    "error": (
+                        f"Tool '{target_step.tool_to_execute}' "
+                        "not registered."
+                    ),
+                }
+
+            try:
+                result = await tool.execute(**target_step.tool_params)
+
+                target_step.result = result
+
+                target_step.status = (
+                    "completed"
+                    if result.get("success")
+                    else "failed"
+                )
+
+                return {
+                    "success": bool(result.get("success")),
                     "step_id": step_id,
                     "status": target_step.status,
                     "result": result,
                 }
-            else:
+
+            except Exception as exc:
+                logger.exception(
+                    "[Planner] Tool execution failed for task %s, step %s",
+                    task_id,
+                    step_id,
+                )
+
                 target_step.status = "failed"
-                return {"success": False, "error": f"Tool '{target_step.tool_to_execute}' not registered."}
+
+                return {
+                    "success": False,
+                    "step_id": step_id,
+                    "status": "failed",
+                    "error": str(exc),
+                }
 
         target_step.status = "completed"
+
         return {
             "success": True,
             "step_id": step_id,
@@ -468,9 +794,20 @@ class GeneralAgentPlanner:
             "message": "Step executed successfully.",
         }
 
-    def get_plan(self, task_id: str) -> Optional[ExecutionPlan]:
+    # ─────────────────────────────────────────────────────────────────────────
+    # GET EXISTING PLAN
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_plan(
+        self,
+        task_id: str,
+    ) -> Optional[ExecutionPlan]:
+
         return self._active_plans.get(task_id)
 
 
-# Global singleton instance
+# ─────────────────────────────────────────────────────────────────────────────
+# GLOBAL PLANNER INSTANCE
+# ─────────────────────────────────────────────────────────────────────────────
+
 planner = GeneralAgentPlanner()
