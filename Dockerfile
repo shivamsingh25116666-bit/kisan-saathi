@@ -34,7 +34,7 @@ COPY data/ ./data/
 COPY static/ ./static/
 COPY main.py .
 COPY pyproject.toml .
-COPY .env.example .env
+
 
 # Create non-root system user and runtime directories
 RUN useradd -m -u 1000 kisanuser && \

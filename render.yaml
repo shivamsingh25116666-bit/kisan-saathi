@@ -1,36 +1,63 @@
 services:
+  # Redis-compatible session storage
+  - type: keyvalue
+    name: kisan-saathi-redis
+    plan: free
+    region: singapore
+    ipAllowList: []
+
+  # Main FastAPI application
   - type: web
     name: kisan-saathi
     runtime: docker
     dockerfilePath: ./Dockerfile
-    region: oregon
+    region: singapore
     plan: free
     healthCheckPath: /health
     autoDeploy: true
+
     envVars:
       - key: PORT
-        value: 8000
+        value: "8000"
+
       - key: ENVIRONMENT
-        value: production
+        value: staging
+
       - key: GEMINI_API_KEY
         sync: false
+
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+
       - key: TWILIO_ACCOUNT_SID
         sync: false
+
       - key: TWILIO_AUTH_TOKEN
         sync: false
+
       - key: TWILIO_WHATSAPP_FROM
         value: "whatsapp:+14155238886"
+
       - key: SESSION_ENCRYPTION_KEY
         generateValue: true
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: kisan-saathi-redis
+          property: connectionString
+
       - key: USE_IN_MEMORY_STATE_FALLBACK
         value: "true"
+
       - key: BROWSER_HEADLESS
         value: "true"
+
       - key: ENABLE_PORTAL_SIMULATION
-        value: "false"
+        value: "true"
+
       - key: TMP_DIR
         value: /tmp/kisan_agent
+
       - key: AUDIT_LOG_DIR
         value: logs/audit
