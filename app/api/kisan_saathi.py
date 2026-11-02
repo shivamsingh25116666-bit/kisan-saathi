@@ -207,16 +207,16 @@ async def get_services() -> dict[str, Any]:
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest) -> ChatResponse:
     """
-    Main conversational endpoint: accepts natural farmer speech or typed queries.
-    Detects language, plans execution steps, runs registered tools, and replies.
+    Context-aware multilingual chat endpoint.
+    Gemini proposes a plan; the existing Python registry executes approved tools.
     """
     session_id = req.session_id or hashlib.sha256(f"web_{uuid.uuid4().hex}".encode()).hexdigest()[:16]
     lang = req.language or detect_language(req.query)
     task_id = f"task_{session_id}_{int(time.time())}"
 
-    logger.info("[KisanSaathi API] Query from %s (lang=%s): '%s'", session_id, lang, req.query)
+    logger.info("[KisanSaathi API] Query from %s (lang=%s)", session_id, lang)
 
-    # 1. Load encrypted conversation memory and reusable farmer facts.
+    # Load Redis-backed conversation memory and farmer facts.
     stored_session = await state_manager.get_session(session_id) or {}
     conversation_history = stored_session.get("conversation_history", [])
     if not isinstance(conversation_history, list):
@@ -226,7 +226,7 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
         farmer_context = {}
     farmer_context.update(req.context or {})
 
-    # 2. Keep the existing rule planner as fallback; Gemini adds contextual reasoning.
+    # Keep the deterministic planner as a fallback.
     plan = await planner.create_plan(
         req.query, task_id=task_id, language=lang, context=farmer_context
     )
@@ -259,7 +259,7 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
             )
         ]
 
-    # 3. Execute the selected registered tool only when required inputs are present.
+    # Execute at most one registered tool per turn. No tool runs while clarification is needed.
     first_step = plan.steps[0] if plan.steps else None
     tool_result_summary = ""
     tool_result_data = None
@@ -267,53 +267,54 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
     if first_step and first_step.tool_to_execute and not plan.clarification_prompt:
         exec_res = await planner.execute_step(task_id, first_step.step_id)
         if exec_res.get("success") and exec_res.get("result", {}).get("data"):
-            data = exec_res["result"]["data"]    # 2. Automatically execute step 1 if it has an actionable tool
-    first_step = plan.steps[0] if plan.steps else None
-    tool_result_summary = ""
-    if first_step and first_step.tool_to_execute:
-        exec_res = await planner.execute_step(task_id, first_step.step_id)
-        if exec_res.get("success") and exec_res.get("result", {}).get("data"):
             data = exec_res["result"]["data"]
+            tool_result_data = data
+
             if plan.category == "crop_insurance":
                 prem = data.get("farmer_premium_per_hectare_inr", 960)
                 sum_ins = data.get("estimated_sum_insured_per_hectare_inr", 48000)
                 tool_result_summary = (
                     f"🌾 {data.get('crop')} फसल के लिए प्रति हेक्टेयर बीमा राशि लगभग ₹{sum_ins:,.0f} है, "
-                    f"जिसमें किसान का प्रीमियम केवल ₹{prem:,.0f} ({data.get('farmer_premium_share_percent')}%) है। "
-                    f"बाकी 98% सरकार वहन करती है।"
+                    f"जिसमें किसान का प्रीमियम ₹{prem:,.0f} ({data.get('farmer_premium_share_percent')}%) है।"
                     if lang in ("hi", "gar") else
-                    f"🌾 For {data.get('crop')}, estimated sum insured is ₹{sum_ins:,.0f}/ha with farmer premium of only ₹{prem:,.0f} ({data.get('farmer_premium_share_percent')}%)."
+                    f"🌾 For {data.get('crop')}, estimated sum insured is ₹{sum_ins:,.0f}/ha and farmer premium is ₹{prem:,.0f} ({data.get('farmer_premium_share_percent')}%)."
                 )
             elif plan.category == "market_prices":
                 tool_result_summary = (
-                    f"🌾 {data.get('commodity')} का मंडी भाव: न्यूनतम ₹{data.get('min_price_inr')}, "
+                    f"🌾 {data.get('commodity')} का उपलब्ध मंडी भाव: न्यूनतम ₹{data.get('min_price_inr')}, "
                     f"मॉडल भाव ₹{data.get('modal_price_inr')}, एमएसपी ₹{data.get('official_msp_inr')}/क्विंटल है।"
                     if lang in ("hi", "gar") else
-                    f"🌾 {data.get('commodity')} Mandi Price: Modal ₹{data.get('modal_price_inr')}, MSP ₹{data.get('official_msp_inr')}/Q."
+                    f"🌾 {data.get('commodity')} price data: minimum ₹{data.get('min_price_inr')}, modal ₹{data.get('modal_price_inr')}, MSP ₹{data.get('official_msp_inr')}/quintal."
                 )
             elif plan.category == "pm_kisan":
                 tool_result_summary = (
-                    "🌾 पीएम-किसान सम्मान निधि के तहत हर 4 महीने में ₹2,000 की किस्त सीधे खाते में आती है (कुल ₹6,000/वर्ष)। "
-                    "इसके लिए बैंक खाते में आधार लिंक और ई-केवाईसी अनिवार्य है।"
+                    "🌾 पीएम-किसान के तहत पात्र किसान परिवारों को सालाना ₹6,000 तीन किस्तों में दिए जाते हैं। व्यक्तिगत किस्त की स्थिति आधिकारिक पोर्टल पर जांचनी होगी।"
                     if lang in ("hi", "gar") else
-                    "🌾 PM-KISAN provides ₹6,000/year in 3 installments of ₹2,000. Active bank Aadhaar seeding and e-KYC are mandatory."
+                    "🌾 PM-KISAN provides eligible farmer families ₹6,000 per year in three installments. An individual's installment status must be checked on the official portal."
                 )
             elif plan.category == "credit_and_loans":
                 tool_result_summary = (
-                    f"🌾 किसान क्रेडिट कार्ड (KCC) पर ₹3 लाख तक का ऋण समय पर चुकाने पर केवल 4% वार्षिक ब्याज पर मिलता है।"
+                    f"🌾 KCC के लिए उपलब्ध अनुमानित ऋण सीमा ₹{data.get('recommended_credit_limit_inr', 0):,.0f} है। बैंक अंतिम सीमा और पात्रता तय करेगा।"
                     if lang in ("hi", "gar") else
-                    f"🌾 Kisan Credit Card (KCC) provides crop loans up to ₹3 Lakhs at effective 4% annual interest with timely repayment."
+                    f"🌾 The indicative KCC credit limit is ₹{data.get('recommended_credit_limit_inr', 0):,.0f}. The bank determines the final limit and eligibility."
                 )
             elif plan.category == "crop_health":
-                diag = data.get("probable_diagnosis", "Pest/Disease")
+                diag = data.get("probable_diagnosis", "संभावित फसल समस्या")
                 tool_result_summary = (
-                    f"🌾 संभावित रोग: {diag}। जैविक उपचार: {data.get('safe_organic_management')}। "
-                    f"रासायनिक उपचार: {data.get('approved_chemical_control')}।"
+                    f"🌾 संभावित समस्या: {diag}। यह प्रारंभिक मार्गदर्शन है; खेत की जांच के बिना पक्का निदान नहीं है।"
                     if lang in ("hi", "gar") else
-                    f"🌾 Likely issue: {diag}. Organic remedy: {data.get('safe_organic_management')}."
+                    f"🌾 Possible issue: {diag}. This is preliminary guidance, not a confirmed diagnosis without field inspection."
                 )
+            elif plan.category == "agronomy":
+                tool_result_summary = (
+                    "🌾 फसल और मिट्टी के लिए उपलब्ध पोषक तत्व संबंधी मार्गदर्शन तैयार है। स्थानीय मिट्टी जांच के अनुसार मात्रा की पुष्टि करें।"
+                    if lang in ("hi", "gar") else
+                    "🌾 I found nutrient guidance for this crop. Confirm exact fertilizer quantities against a local soil test."
+                )
+            elif plan.category == "crop_insurance" and data.get("scheme"):
+                tool_result_summary = str(data.get("scheme"))
 
-    # 4. Prepare a safe deterministic fallback response.
+    # Safe fallback if Gemini is unavailable or a tool did not return data.
     if plan.clarification_prompt:
         reply = plan.clarification_prompt
     elif tool_result_summary:
@@ -325,7 +326,7 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
             "🌾 Please tell me a little more about your crop, problem and location so I can guide you accurately."
         )
 
-    # 5. Generate a natural response grounded in conversation and actual tool output.
+    # Gemini writes the final answer using history and actual tool output only.
     if llm_patch:
         try:
             from app.agent.llm_brain import generate_reply
@@ -343,7 +344,7 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
         except Exception as exc:
             logger.warning("[KisanSaathi API] Gemini response unavailable: %s", exc)
 
-    # 6. Persist redacted chat history and non-sensitive farmer facts in encrypted Redis.
+    # Persist redacted conversation and non-sensitive crop/location facts.
     def redact_chat_text(value: str) -> str:
         value = re.sub(r"(?<!\\d)(?:\\d[\\s-]?){11}\\d(?!\\d)", "[Aadhaar Redacted]", value)
         value = re.sub(r"(?<!\\d)\\d{6}(?!\\d)", "[Code Redacted]", value)
@@ -367,26 +368,25 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
         ttl_seconds=7 * 24 * 60 * 60,
     )
 
-    # 4. Record in task history
+    # Keep the existing in-process task list for the dashboard.
     if session_id not in _TASK_HISTORY:
         _TASK_HISTORY[session_id] = []
     _TASK_HISTORY[session_id].append({
         "task_id": task_id,
-        "query": req.query,
+        "query": redact_chat_text(req.query),
         "category": plan.category,
-        "status": "in_progress",
+        "status": "completed" if exec_res and exec_res.get("success") else "in_progress",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "plan": plan.to_dict(),
     })
 
-    # Suggestions for quick buttons
     suggestions = []
     if plan.category == "crop_insurance":
-        suggestions = ["दस्तावेज़ अपलोड करें (Upload Documents)", "प्रीमियम विवरण देखें", "दावा कैसे करें?"]
+        suggestions = ["दस्तावेज़ों की सूची देखें", "प्रीमियम विवरण समझें", "दावा कैसे करें?"]
     elif plan.category == "market_prices":
-        suggestions = ["अन्य फसलों के भाव", "फसल बीमा कराएं", "नजदीकी मंडी खोजें"]
+        suggestions = ["दूसरी फसल का भाव", "फसल बीमा जानकारी", "नजदीकी मंडी"]
     else:
-        suggestions = ["फसल बीमा आवेदन", "मंडी भाव", "पीएम-किसान स्थिति", "खाद की सलाह"]
+        suggestions = ["फसल बीमा जानकारी", "मंडी भाव पूछें", "पीएम-किसान जानकारी", "मिट्टी की सलाह"]
 
     return ChatResponse(
         session_id=session_id,
