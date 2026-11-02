@@ -152,8 +152,22 @@ Rules:
             params = {}
 
         if tool_name:
-            allowed_params = set((tool_map[tool_name].get("parameters") or {}).keys())
+            parameter_schema = tool_map[tool_name].get("parameters") or {}
+            allowed_params = set(parameter_schema.keys())
             params = {k: v for k, v in params.items() if k in allowed_params}
+            # Convert model-produced scalar values to the exact Python types
+            # expected by the existing deterministic tool functions.
+            for key, value in list(params.items()):
+                expected_type = parameter_schema.get(key)
+                try:
+                    if expected_type == "float":
+                        params[key] = float(value)
+                    elif expected_type == "int":
+                        params[key] = int(value)
+                    elif expected_type == "string" and value is not None:
+                        params[key] = str(value)
+                except (TypeError, ValueError):
+                    params.pop(key, None)
             required = _REQUIRED_TOOL_FIELDS.get(tool_name, ())
             missing = [field for field in required if params.get(field) in (None, "")]
             if missing:
