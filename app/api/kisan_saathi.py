@@ -248,16 +248,20 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
         plan.extracted_facts.update(llm_patch.get("extracted_facts", {}))
         plan.missing_info = llm_patch.get("missing_info", [])
         plan.clarification_prompt = llm_patch.get("clarification_question")
-        plan.steps = [
-            TaskStep(
-                step_id=1,
-                title=llm_patch.get("step_title", "Understand farmer request"),
-                description=llm_patch.get("step_description", "Use conversation context to help the farmer."),
-                status="pending",
-                tool_to_execute=llm_patch.get("tool_name"),
-                tool_params=llm_patch.get("tool_params", {}),
-            )
-        ]
+        llm_step = TaskStep(
+            step_id=1,
+            title=llm_patch.get("step_title", "Understand farmer request"),
+            description=llm_patch.get("step_description", "Use conversation context to help the farmer."),
+            status="pending",
+            tool_to_execute=llm_patch.get("tool_name"),
+            tool_params=llm_patch.get("tool_params", {}),
+        )
+        if llm_patch.get("tool_name") == "crop_insurance_details":
+            # Preserve the existing document, approval and portal workflow steps.
+            existing_follow_up_steps = [step for step in plan.steps if step.step_id > 1]
+            plan.steps = [llm_step] + existing_follow_up_steps
+        else:
+            plan.steps = [llm_step]
 
     # Execute at most one registered tool per turn. No tool runs while clarification is needed.
     first_step = plan.steps[0] if plan.steps else None
@@ -270,15 +274,17 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
             data = exec_res["result"]["data"]
             tool_result_data = data
 
-            if plan.category == "crop_insurance":
-                prem = data.get("farmer_premium_per_hectare_inr", 960)
-                sum_ins = data.get("estimated_sum_insured_per_hectare_inr", 48000)
+            if first_step.tool_to_execute == "crop_insurance_details":
+                prem = data.get("farmer_premium_per_hectare_inr", 0)
+                sum_ins = data.get("estimated_sum_insured_per_hectare_inr", 0)
                 tool_result_summary = (
                     f"🌾 {data.get('crop')} फसल के लिए प्रति हेक्टेयर बीमा राशि लगभग ₹{sum_ins:,.0f} है, "
                     f"जिसमें किसान का प्रीमियम ₹{prem:,.0f} ({data.get('farmer_premium_share_percent')}%) है।"
                     if lang in ("hi", "gar") else
                     f"🌾 For {data.get('crop')}, estimated sum insured is ₹{sum_ins:,.0f}/ha and farmer premium is ₹{prem:,.0f} ({data.get('farmer_premium_share_percent')}%)."
                 )
+            elif first_step.tool_to_execute == "crop_damage_claim":
+                tool_result_summary = str(data.get("mandatory_72_hour_rule") or data.get("scheme") or "Crop damage claim guidance is available.")
             elif plan.category == "market_prices":
                 tool_result_summary = (
                     f"🌾 {data.get('commodity')} का उपलब्ध मंडी भाव: न्यूनतम ₹{data.get('min_price_inr')}, "
@@ -398,7 +404,7 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
         plan=plan.to_dict(),
         suggested_actions=suggestions,
         requires_approval=any(s.requires_farmer_approval for s in plan.steps),
-        requires_otp=(plan.category == "crop_insurance"),
+        requires_otp=(first_step is not None and first_step.tool_to_execute == "crop_insurance_details" and not bool(plan.clarification_prompt)),
     )
 
 
