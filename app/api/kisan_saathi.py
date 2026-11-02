@@ -224,7 +224,18 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
     farmer_context = stored_session.get("farmer_context", {})
     if not isinstance(farmer_context, dict):
         farmer_context = {}
-    farmer_context.update(req.context or {})
+    allowed_context_keys = {
+        "crop_name", "state", "district", "land_area_ha",
+        "soil_type", "season", "symptoms",
+    }
+    farmer_context = {
+        key: value for key, value in farmer_context.items()
+        if key in allowed_context_keys
+    }
+    farmer_context.update({
+        key: value for key, value in (req.context or {}).items()
+        if key in allowed_context_keys and value not in (None, "")
+    })
 
     # Keep the deterministic planner as a fallback.
     plan = await planner.create_plan(
