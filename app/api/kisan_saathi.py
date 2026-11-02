@@ -30,7 +30,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.agent.graph import resume_agent_pipeline_with_otp, run_agent_pipeline
-from app.agent.planner import SUPPORTED_LANGUAGES, detect_language, planner
+from app.agent.planner import SUPPORTED_LANGUAGES, TaskStep, detect_language, planner
 from app.agent.tools import registry
 from app.core.config import get_settings
 from app.core.state import AgentState
@@ -216,10 +216,58 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
 
     logger.info("[KisanSaathi API] Query from %s (lang=%s): '%s'", session_id, lang, req.query)
 
-    # 1. Create dynamic execution plan using General-Purpose Planner
-    plan = await planner.create_plan(req.query, task_id=task_id, language=lang, context=req.context)
+    # 1. Load encrypted conversation memory and reusable farmer facts.
+    stored_session = await state_manager.get_session(session_id) or {}
+    conversation_history = stored_session.get("conversation_history", [])
+    if not isinstance(conversation_history, list):
+        conversation_history = []
+    farmer_context = stored_session.get("farmer_context", {})
+    if not isinstance(farmer_context, dict):
+        farmer_context = {}
+    farmer_context.update(req.context or {})
 
-    # 2. Automatically execute step 1 if it has an actionable tool
+    # 2. Keep the existing rule planner as fallback; Gemini adds contextual reasoning.
+    plan = await planner.create_plan(
+        req.query, task_id=task_id, language=lang, context=farmer_context
+    )
+    llm_patch = None
+    try:
+        from app.agent.llm_brain import create_plan_patch
+        llm_patch = await create_plan_patch(
+            query=req.query,
+            language=lang,
+            context=farmer_context,
+            history=conversation_history,
+            available_tools=registry.list_tools(),
+        )
+    except Exception as exc:
+        logger.warning("[KisanSaathi API] Gemini planner unavailable; using rule planner: %s", exc)
+
+    if llm_patch:
+        plan.category = llm_patch["category"]
+        plan.extracted_facts.update(llm_patch.get("extracted_facts", {}))
+        plan.missing_info = llm_patch.get("missing_info", [])
+        plan.clarification_prompt = llm_patch.get("clarification_question")
+        plan.steps = [
+            TaskStep(
+                step_id=1,
+                title=llm_patch.get("step_title", "Understand farmer request"),
+                description=llm_patch.get("step_description", "Use conversation context to help the farmer."),
+                status="pending",
+                tool_to_execute=llm_patch.get("tool_name"),
+                tool_params=llm_patch.get("tool_params", {}),
+            )
+        ]
+
+    # 3. Execute the selected registered tool only when required inputs are present.
+    first_step = plan.steps[0] if plan.steps else None
+    tool_result_summary = ""
+    tool_result_data = None
+    exec_res = None
+    if first_step and first_step.tool_to_execute and not plan.clarification_prompt:
+        exec_res = await planner.execute_step(task_id, first_step.step_id)
+        if exec_res.get("success") and exec_res.get("result", {}).get("data"):
+            data = exec_res["result"]["data"]    # 2. Automatically execute step 1 if it has an actionable tool
     first_step = plan.steps[0] if plan.steps else None
     tool_result_summary = ""
     if first_step and first_step.tool_to_execute:
@@ -265,26 +313,59 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
                     f"🌾 Likely issue: {diag}. Organic remedy: {data.get('safe_organic_management')}."
                 )
 
-    # 3. Formulate conversational response
+    # 4. Prepare a safe deterministic fallback response.
     if plan.clarification_prompt:
         reply = plan.clarification_prompt
     elif tool_result_summary:
-        if plan.category == "crop_insurance":
-            suffix = (
-                "\n\n📋 आगे बढ़ने के लिए कृपया अपना आधार कार्ड, बैंक पासबुक और खतौनी दस्तावेज़ अपलोड करें, "
-                "ताकि हम आवेदन तैयार कर सकें।"
-                if lang in ("hi", "gar") else
-                "\n\n📋 To proceed with application, please upload your Aadhaar, Bank Passbook, and Land Khatauni."
-            )
-            reply = tool_result_summary + suffix
-        else:
-            reply = tool_result_summary
+        reply = tool_result_summary
     else:
         reply = (
-            f"🌾 नमस्ते किसान भाई! मैंने आपका अनुरोध समझ लिया है। हम इस पर कार्य कर रहे हैं।"
+            "🌾 कृपया अपनी फसल, समस्या और स्थान के बारे में थोड़ा और बताएं ताकि मैं सही मार्गदर्शन दे सकूं।"
             if lang in ("hi", "gar") else
-            f"🌾 Hello! I have understood your request and mapped out the action steps."
+            "🌾 Please tell me a little more about your crop, problem and location so I can guide you accurately."
         )
+
+    # 5. Generate a natural response grounded in conversation and actual tool output.
+    if llm_patch:
+        try:
+            from app.agent.llm_brain import generate_reply
+            generated_reply = await generate_reply(
+                query=req.query,
+                language=lang,
+                history=conversation_history,
+                category=plan.category,
+                plan=plan.to_dict(),
+                tool_result=tool_result_data,
+                clarification=plan.clarification_prompt,
+            )
+            if generated_reply:
+                reply = generated_reply
+        except Exception as exc:
+            logger.warning("[KisanSaathi API] Gemini response unavailable: %s", exc)
+
+    # 6. Persist redacted chat history and non-sensitive farmer facts in encrypted Redis.
+    def redact_chat_text(value: str) -> str:
+        value = re.sub(r"(?<!\\d)(?:\\d[\\s-]?){11}\\d(?!\\d)", "[Aadhaar Redacted]", value)
+        value = re.sub(r"(?<!\\d)\\d{6}(?!\\d)", "[Code Redacted]", value)
+        return value[:4000]
+
+    updated_history = list(conversation_history[-18:])
+    updated_history.append({"role": "user", "content": redact_chat_text(req.query)})
+    updated_history.append({"role": "assistant", "content": redact_chat_text(reply)})
+    updated_farmer_context = dict(farmer_context)
+    updated_farmer_context.update({
+        key: value for key, value in plan.extracted_facts.items()
+        if key in {"crop_name", "state", "district", "land_area_ha", "soil_type", "season", "symptoms"}
+        and value not in (None, "")
+    })
+    await state_manager.update_session(
+        session_id,
+        {
+            "conversation_history": updated_history[-20:],
+            "farmer_context": updated_farmer_context,
+        },
+        ttl_seconds=7 * 24 * 60 * 60,
+    )
 
     # 4. Record in task history
     if session_id not in _TASK_HISTORY:
