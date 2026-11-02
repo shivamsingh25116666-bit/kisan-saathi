@@ -267,19 +267,25 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
             tool_to_execute=llm_patch.get("tool_name"),
             tool_params=llm_patch.get("tool_params", {}),
         )
+        # Preserve the deterministic planner's complete workflow.
+        # Gemini improves the first step without deleting follow-up steps.
+        existing_follow_up_steps = [
+            step for step in plan.steps if step.step_id > 1
+        ]
+
         if llm_patch.get("tool_name") == "crop_insurance_details":
-            # Preserve the existing document, approval and portal workflow steps.
-            existing_follow_up_steps = [step for step in plan.steps if step.step_id > 1]
-            if not any(step.requires_farmer_approval for step in existing_follow_up_steps):
+            if not any(
+                step.requires_farmer_approval
+                for step in existing_follow_up_steps
+            ):
                 existing_follow_up_steps = [
                     TaskStep(2, "Document intake", "Collect and verify required application documents."),
                     TaskStep(3, "Farmer review and approval", "Show the farmer all application details and obtain explicit approval.", requires_farmer_approval=True),
                     TaskStep(4, "Official portal submission", "Proceed only after explicit approval and legitimate portal verification.", requires_farmer_approval=True),
                     TaskStep(5, "Submission confirmation", "Report only the status returned by the official portal."),
                 ]
-            plan.steps = [llm_step] + existing_follow_up_steps
-        else:
-            plan.steps = [llm_step]
+
+        plan.steps = [llm_step] + existing_follow_up_steps
 
     # Execute at most one registered tool per turn. No tool runs while clarification is needed.
     first_step = plan.steps[0] if plan.steps else None
