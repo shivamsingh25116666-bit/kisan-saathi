@@ -155,6 +155,21 @@ Rules:
             parameter_schema = tool_map[tool_name].get("parameters") or {}
             allowed_params = set(parameter_schema.keys())
             params = {k: v for k, v in params.items() if k in allowed_params}
+            # Fill omitted tool arguments only from previously stated farmer facts.
+            context_values = context or {}
+            context_aliases = {
+                "crop_name": "crop_name",
+                "state": "state",
+                "district": "district",
+                "land_area_hectares": "land_area_ha",
+                "soil_type": "soil_type",
+                "symptoms": "symptoms",
+                "season": "season",
+            }
+            for parameter, fact_key in context_aliases.items():
+                if parameter in allowed_params and params.get(parameter) in (None, ""):
+                    if context_values.get(fact_key) not in (None, ""):
+                        params[parameter] = context_values[fact_key]
             # Convert model-produced scalar values to the exact Python types
             # expected by the existing deterministic tool functions.
             for key, value in list(params.items()):
